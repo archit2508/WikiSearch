@@ -15,13 +15,16 @@ import retrofit2.Callback
 import retrofit2.Response
 import android.app.Activity
 import android.content.Intent
+import android.os.PersistableBundle
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.inputmethod.InputMethodManager
 import com.archit.wikisearch.activity.WebViewActivity
 import com.archit.wikisearch.adapter.OnItemClickListener
 import com.archit.wikisearch.apiService.WikiSearchService
+import com.archit.wikisearch.model.Page
 import java.util.*
+import kotlin.collections.ArrayList
 
 class MainActivity : AppCompatActivity(), OnItemClickListener {
 
@@ -40,36 +43,59 @@ class MainActivity : AppCompatActivity(), OnItemClickListener {
     )
     lateinit var timer: Timer
     lateinit var searchService: WikiSearchService
+    var resultList = java.util.ArrayList<Page>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        rvResults.layoutManager = LinearLayoutManager(this)
         timer = Timer()
         searchService = RetrofitClient.getCacheEnabledRetrofit(applicationContext).create(WikiSearchService::class.java)
-        rvResults.layoutManager = LinearLayoutManager(this)
         setTouchListenerOnSearchInput()
         setTextChangedListenerOnSearchInput()
+    }
+
+    /**
+     * saves the result list
+     * intention is to avoid network call on orientation change
+     */
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putParcelableArrayList("result_list",resultList)
+    }
+
+    /**
+     * restores the result list
+     */
+    override fun onRestoreInstanceState(savedInstanceState: Bundle) {
+        super.onRestoreInstanceState(savedInstanceState)
+        if(savedInstanceState != null){
+            resultList = savedInstanceState.getParcelableArrayList<Page>("result_list")!!
+            rvResults.adapter = SearchResultsAdapter(resultList, this@MainActivity)
+        }
     }
 
     /**
      * Will hit search api when input text changes
      */
     private fun setTextChangedListenerOnSearchInput() {
-        searchInput.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {
-            }
-
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-            }
-
-            override fun afterTextChanged(s: Editable?) {
-                if (searchInput.text.toString().isNotEmpty()){
-                    searchLayout.isErrorEnabled = false
-                    hitSearchOnTypingFinished()
+        searchInput.post {
+            searchInput.addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {
                 }
-            }
-        })
+
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                }
+
+                override fun afterTextChanged(s: Editable?) {
+                    if (searchInput.text.toString().isNotEmpty()) {
+                        searchLayout.isErrorEnabled = false
+                        hitSearchOnTypingFinished()
+                    }
+                }
+            })
+        }
     }
 
     /**
@@ -125,19 +151,22 @@ class MainActivity : AppCompatActivity(), OnItemClickListener {
             override fun onFailure(call: Call<SearchResults>, t: Throwable) {
                 handleKeyboardVisibility(hideKeyboard)
                 setProgressInvisible()
+                rvResults.adapter = SearchResultsAdapter(listOf(), this@MainActivity)
                 Toast.makeText(this@MainActivity, "Unable to get search results", Toast.LENGTH_LONG)
                     .show()
             }
+
             override fun onResponse(call: Call<SearchResults>, response: Response<SearchResults>) {
                 setProgressInvisible()
                 handleKeyboardVisibility(hideKeyboard)
                 handleEditTextFocus(clearFocus)
                 val results = response.body()
                 if (results?.query == null) {
+                    rvResults.adapter = SearchResultsAdapter(listOf(), this@MainActivity)
                     Toast.makeText(this@MainActivity, "No results found", Toast.LENGTH_LONG).show()
                 } else {
-                    rvResults.adapter =
-                        SearchResultsAdapter(results?.query!!.pages, this@MainActivity)
+                    resultList = results?.query!!.pages as java.util.ArrayList<Page>
+                    rvResults.adapter = SearchResultsAdapter(resultList, this@MainActivity)
                 }
             }
         })
@@ -157,7 +186,7 @@ class MainActivity : AppCompatActivity(), OnItemClickListener {
      * decides whether to clear focus from edit text
      */
     private fun handleEditTextFocus(clearFocus: Boolean) {
-        if(clearFocus){
+        if (clearFocus) {
             searchLayout.clearFocus()
         }
     }
@@ -166,7 +195,7 @@ class MainActivity : AppCompatActivity(), OnItemClickListener {
      * decides whether to hide keyboard when response comes from api
      */
     private fun handleKeyboardVisibility(hideKeyboard: Boolean) {
-        if(hideKeyboard){
+        if (hideKeyboard) {
             hideSoftKeyboard(this@MainActivity)
             searchLayout.clearFocus()
         }

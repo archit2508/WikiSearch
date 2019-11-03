@@ -4,7 +4,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkInfo
 import okhttp3.Cache
-import okhttp3.CacheControl
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -23,35 +23,42 @@ object RetrofitClient {
         return isConnected
     }
 
-    /*
-     * As of now, cache is getting created but unexpectedly,
-     * saved cache files are not being read when offline
-     * API Response gives "HTTP 504 Unsatisfiable Request (only-if-cached)" when offline
-     * RCA is in WIP for this behaviour
+    /**
+     * returns cache enables Retrofit client
+     * maintains 10 seconds cache while online
+     * maintains 7 days cache when offline
      */
     fun getCacheEnabledRetrofit(context: Context): Retrofit {
-        val okHttpClient = OkHttpClient.Builder()
-            .cache(Cache(context.cacheDir, (5 * 1024 * 1024).toLong()))
-            .addInterceptor { chain ->
-                var request = chain.request()
-                request = if (hasNetwork(context)!!)
-                    request.newBuilder()
-                        .removeHeader("Cache-Control")
-                        .header(
-                            "Cache-Control",
-                            "public, max-age=" + 5)
-                        .removeHeader("Pragma")
-                        .build()
-                else
-                    request.newBuilder()
-                        .header(
-                            "Cache-Control",
-                            "public, only-if-cached, max-stale=" + 60 * 60 * 24 * 7
-                        )
-                        .removeHeader("Pragma")
-                        .build()
-                chain.proceed(request)
+
+        val onlineCacheInterceptor = Interceptor { chain ->
+            val originalResponse = chain.proceed(chain.request())
+            val cacheControl = originalResponse.header("Cache-Control")
+            if (cacheControl == null || cacheControl!!.contains("no-store") || cacheControl!!.contains("no-cache") ||
+                cacheControl!!.contains("must-revalidate") || cacheControl!!.contains("max-age=0")
+            ) {
+                originalResponse.newBuilder()
+                    .header("Cache-Control", "public, max-age=" + 10)
+                    .build()
+            } else {
+                originalResponse
             }
+        }
+
+        val offlineCacheInterceptor = Interceptor { chain ->
+            var request = chain.request()
+            if (!hasNetwork(context)!!) {
+                val maxStale = 60 * 60 * 24 * 7
+                request = request.newBuilder()
+                    .header("Cache-Control", "public, only-if-cached, max-stale=$maxStale")
+                    .build()
+            }
+            chain.proceed(request)
+        }
+
+        val okHttpClient = OkHttpClient.Builder()
+            .addNetworkInterceptor(onlineCacheInterceptor)
+            .addInterceptor(offlineCacheInterceptor)
+            .cache(Cache(File(context.cacheDir, "http-cache"), 100 * 1024 * 1024))
             .build()
 
         return Retrofit.Builder()

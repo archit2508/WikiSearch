@@ -25,7 +25,7 @@ class SearchResultsAdapter(private val pages: List<Page>, private val listener: 
             Picasso.get().load(pages[position].thumbnail!!.source).into(holder.itemView.imageView)
         holder.itemView.title.text = pages[position].title
         if (pages[position].terms != null)
-            holder.itemView.desc.text = pages[position].terms.description[0]
+            holder.itemView.desc.text = pages[position].terms?.description!![0]
 
         holder.itemView.setOnClickListener {
             listener.onResultItemClick(pages[position].pageid.toString())
